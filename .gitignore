@@ -1,0 +1,5 @@
+config.json
+serverData.json
+package-lock.json
+node_modules/
+AmongUsBot.bat*
