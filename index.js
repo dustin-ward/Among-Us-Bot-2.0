@@ -1,71 +1,18 @@
 const Discord = require("discord.js");
 const fs = require("fs");
-const { type } = require("os");
-const { getHeapCodeStatistics } = require("v8");
+// const { type } = require("os");
+// const { getHeapCodeStatistics } = require("v8");
 const config = require("./config.json");
+const channelManager = require('./src/channelManager.js');
 
 const client = new Discord.Client();
+client.commands = new Discord.Collection();
 
-clearServerChannels = (guild) => {
-    fs.readFile('./serverData.json', async(err, data) => {
-        if(err) throw err;
-        console.log("serverData succesfully read");
+const commandFiles = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
 
-        let serverData = JSON.parse(data);
-        for(i in serverData.servers) {
-            if(serverData.servers[i].id === guild.id) {
-                var serverIdx = i;
-                break;
-            }
-        }
-
-        serverData.servers[serverIdx].lobbies.forEach(channel => {
-            client.channels.fetch(channel.voice.id).then(ch => {ch.delete()}).catch(console.error);
-            client.channels.fetch(channel.generalText.id).then(ch => {ch.delete()}).catch(console.error);
-            client.channels.fetch(channel.queueText.id).then(ch => {ch.delete()}).catch(console.error);
-            client.channels.fetch(channel.category.id).then(ch => {ch.delete()}).catch(console.error);
-        });
-
-        serverData.servers[serverIdx].lobbies = [];
-
-        fs.writeFile('./serverData.json', JSON.stringify(serverData, null, 4), (err) => { if(err) throw err; });
-    });
-}
-
-setupServerChannels = (guild, numLobbies) => {
-    fs.readFile('./serverData.json', async(err, data) => {
-        if(err) throw err;
-        console.log("serverData succesfully read");
-
-        let serverData = JSON.parse(data);
-        for(i in serverData.servers) {
-            if(serverData.servers[i].id === guild.id) {
-                var serverIdx = i;
-                break;
-            }
-        }
-
-        clearServerChannels(guild);
-
-        for(let i=1; i<=numLobbies; i++) {
-            const _category = await guild.channels.create("Lobby " + i, {type: 'category'});
-            const _queueText = await guild.channels.create("lobby-" + i + "-info", {type: 'text', parent: _category});
-            const _generalText = await guild.channels.create("lobby-" + i + "-chat", {type: 'text', parent: _category});
-            const _voice = await guild.channels.create("Lobby " + i + " Voice", {type: 'voice', parent: _category, userLimit: 10});
-            let lobby = {
-                category: _category,
-                queueText: _queueText,
-                generalText: _generalText,
-                voice: _voice
-            };
-            
-            serverData.servers[serverIdx].lobbies.push(lobby);
-    
-            console.log("Lobby " + i + " created");
-        }
-
-        fs.writeFile('./serverData.json', JSON.stringify(serverData, null, 4), (err) => { if(err) throw err; });
-    });
+for (const file of commandFiles) {
+	const command = require(`./commands/${file}`);
+	client.commands.set(command.name, command);
 }
 
 client.on("ready", () => {
@@ -89,20 +36,28 @@ client.on("guildCreate", guild => {
         }
 
         if(newServer) {
-            serverData.servers.push({id: guild.id, lobbies: []});
+            serverData.servers.push({id: guild.id, queue: null, lobbies: []});
             fs.writeFile('./serverData.json', JSON.stringify(serverData, null, 4), (err) => { if(err) throw err; });
         }
-
-        setupServerChannels(guild, 3);
+    
+        channelManager.setupLobbies(guild, 3);
     });
 });
 
 client.on("message", message => {
-    if(message.content == 'setup') {
-        setupServerChannels(message.guild, 3);
-    }
-    if(message.content == 'clean') {
-        clearServerChannels(message.guild);
+    if (!message.content.startsWith(config.prefix) || message.author.bot) return;
+
+	const args = message.content.slice(config.prefix.length).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    if (!client.commands.has(command)) return;
+
+    try {
+        client.commands.get(command).execute(message, args);
+    } 
+    catch (error) {
+        console.error(error);
+        message.reply('there was an error trying to execute that command!');
     }
 });
 
